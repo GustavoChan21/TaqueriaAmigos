@@ -14,3 +14,13 @@ Versión estática lista para `Deploy from a branch → main → /(root)`.
 
 Sube todos los archivos de este ZIP directamente a la raíz de `Taqueria-Los-Amigos`.
 En GitHub Pages deja Custom domain vacío.
+
+
+## Ajuste v4
+La creación de una comanda utiliza un único modal/formulario. El formulario cambia sus campos internamente según Mesa, Para llevar o Domicilio y no abre ventanas adicionales para capturar los datos del servicio.
+
+
+## v5
+- Responsive reforzado en POS, modal de comanda, catálogo y fiado.
+- Fiado rediseñado con KPIs, buscador, filtros, progreso de pago y modal de abono.
+- CRUD de catálogo: alta, edición, disponibilidad, mostrar en menú y eliminación/desactivación segura.

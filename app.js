@@ -58,7 +58,41 @@ function mesas(){
  return `<h1>Mesas</h1><div class="tables">${state.tables.map(t=>{const o=state.orders.find(o=>o.table_id===t.id&&!['pagado','cancelado','entregado'].includes(o.status));return `<div class="tablecard ${o?'busy':'free'}"><span>▦</span><b>${esc(t.name)}</b><span>${o?money(o.total):'Disponible'}</span>${o?`<small>#${o.folio} · ${esc(o.status)}</small>`:''}</div>`}).join('')}</div>`;
 }
 function products(){
- return `<div class="titlebar"><h1>Catálogo de productos</h1><button class="primary" id="newProduct">＋ Nuevo producto</button></div><section class="tablewrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Estado</th><th></th></tr></thead><tbody>${state.products.map(p=>`<tr><td><b>${esc(p.name)}</b><small>${esc(p.description||'')}</small></td><td>${esc(state.cats.find(c=>c.id===p.category_id)?.name||'—')}</td><td>${money(p.price)}</td><td><span class="badge ${p.sold_out?'red':'green'}">${p.sold_out?'Agotado':'Disponible'}</span></td><td><button data-sold="${p.id}">${p.sold_out?'Activar':'Marcar agotado'}</button></td></tr>`).join('')}</tbody></table></section>`;
+ const active=state.products.filter(p=>p.active!==false).length,sold=state.products.filter(p=>p.sold_out).length;
+ return `<div class="pagehead"><div><h1>Catálogo</h1><p class="muted">Administra productos, precios, categorías y disponibilidad.</p></div><button class="primary" id="newProduct">＋ Nuevo producto</button></div>
+ <div class="compactstats"><span><b>${state.products.length}</b> productos</span><span><b>${active}</b> activos</span><span><b>${sold}</b> agotados</span></div>
+ <section class="catalogpanel"><div class="catalogtoolbar"><div class="search grow"><span>⌕</span><input id="catalogSearch" placeholder="Buscar producto..."></div><select id="catalogCategory"><option value="">Todas las categorías</option>${state.cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+ <div id="catalogContent">${catalogRows(state.products)}</div></section>`;
+}
+function catalogRows(items){
+ if(!items.length)return `<div class="empty"><b>No hay productos</b><span>Agrega un producto para comenzar.</span></div>`;
+ return `<div class="productlist">${items.map(p=>`<article class="productadmin"><div class="productavatar">${esc(p.name).slice(0,1).toUpperCase()}</div><div class="productinfo"><b>${esc(p.name)}</b><span>${esc(state.cats.find(c=>c.id===p.category_id)?.name||'Sin categoría')} · ${money(p.price)}</span></div><div class="productstatus"><span class="badge ${p.sold_out?'red':'green'}">${p.sold_out?'Agotado':'Disponible'}</span></div><div class="rowactions"><button title="Editar" data-editproduct="${p.id}">Editar</button><button data-sold="${p.id}">${p.sold_out?'Activar':'Agotar'}</button><button class="dangerghost" data-deleteproduct="${p.id}">Eliminar</button></div></article>`).join('')}</div>`;
+}
+function openProductModal(id=null){
+ const p=id?state.products.find(x=>x.id===id):null;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><form class="modal productmodal" id="productForm"><div class="modalhead"><div><small>CATÁLOGO</small><h2>${p?'Editar producto':'Nuevo producto'}</h2><p>${p?'Actualiza la información del producto.':'Captura los datos del nuevo producto.'}</p></div><button type="button" class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="fieldgrid">${field('Nombre *','productName',p?.name||'')}${field('Precio *','productPrice',p?.price||'','number')}<label>Categoría<select id="productCategory">${state.cats.map(c=>`<option value="${c.id}" ${p?.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>${field('Descripción','productDescription',p?.description||'')}</div><div class="togglegrid"><label class="toggleline"><input id="productActive" type="checkbox" ${p?.active!==false?'checked':''}><span>Producto activo</span></label><label class="toggleline"><input id="productMenu" type="checkbox" ${p?.show_on_menu!==false?'checked':''}><span>Mostrar en menú</span></label><label class="toggleline"><input id="productSold" type="checkbox" ${p?.sold_out?'checked':''}><span>Marcar agotado</span></label></div></div><div class="modalfoot"><button type="button" id="cancelProduct">Cancelar</button><button class="primary" type="submit">${p?'Guardar cambios':'Crear producto'}</button></div></form></div>`);
+ $('#modalClose').onclick=$('#cancelProduct').onclick=closeModal;$('#productForm').onsubmit=e=>{e.preventDefault();saveProduct(p?.id||null)};
+}
+async function saveProduct(id){
+ const payload={name:$('#productName').value.trim(),price:Number($('#productPrice').value),category_id:$('#productCategory').value||null,description:$('#productDescription').value.trim(),active:$('#productActive').checked,show_on_menu:$('#productMenu').checked,sold_out:$('#productSold').checked};
+ if(!payload.name)return toast('Ingresa el nombre del producto');if(!Number.isFinite(payload.price)||payload.price<0)return toast('Ingresa un precio válido');
+ const r=id?await db.from('products').update(payload).eq('id',id):await db.from('products').insert(payload);
+ if(r.error)return toast(r.error.message);closeModal();toast(id?'Producto actualizado':'Producto creado');load();
+}
+async function deleteProduct(id){
+ const p=state.products.find(x=>x.id===id);if(!p)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal confirmmodal"><div class="modalhead"><div><small>CONFIRMAR</small><h2>Eliminar producto</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><p>¿Deseas eliminar <b>${esc(p.name)}</b> del catálogo?</p><p class="hint">Si tiene ventas históricas, se desactivará para conservar el historial.</p></div><div class="modalfoot"><button id="cancelDelete">Cancelar</button><button class="danger" id="confirmDelete">Eliminar</button></div></div></div>`);
+ $('#modalClose').onclick=$('#cancelDelete').onclick=closeModal;$('#confirmDelete').onclick=async()=>{let r=await db.from('products').delete().eq('id',id);if(r.error)r=await db.from('products').update({active:false,show_on_menu:false}).eq('id',id);if(r.error)return toast(r.error.message);closeModal();toast('Producto eliminado');load()}
+}
+function filterCatalog(){
+ const q=($('#catalogSearch')?.value||'').toLowerCase(),cat=$('#catalogCategory')?.value||'';
+ const items=state.products.filter(p=>(!q||p.name.toLowerCase().includes(q))&&(!cat||p.category_id===cat));
+ $('#catalogContent').innerHTML=catalogRows(items);bindCatalogRows();
+}
+function bindCatalogRows(){
+ document.querySelectorAll('[data-editproduct]').forEach(b=>b.onclick=()=>openProductModal(b.dataset.editproduct));
+ document.querySelectorAll('[data-deleteproduct]').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.deleteproduct));
+ document.querySelectorAll('[data-sold]').forEach(b=>b.onclick=()=>toggleSold(b.dataset.sold));
 }
 function menu(){
  return `<div class="titlebar"><h1>Menú para compartir</h1><button class="primary" id="pdfMenu">▣ Generar PDF</button></div><section class="menu"><h2>${esc(state.settings.business_name)}</h2><p>${esc(state.settings.subtitle||'')}</p>${state.cats.map(c=>{const ps=state.products.filter(p=>p.category_id===c.id&&p.show_on_menu&&p.active);return ps.length?`<div><h3>${esc(c.name)}</h3>${ps.map(p=>`<div class="menurow"><div><b>${esc(p.name)}</b>${state.settings.show_descriptions?`<small>${esc(p.description||'')}</small>`:''}</div><strong>${money(p.price)}</strong></div>`).join('')}</div>`:''}).join('')}</section>`;
@@ -72,14 +106,25 @@ function salesHistory(){
 }
 
 function fiado(){
- const pending=state.credits.filter(c=>Number(c.balance)>0), total=pending.reduce((a,c)=>a+Number(c.balance),0);
- return `<div class="titlebar"><div><h1>Fiado</h1><p class="muted">Control de adeudos y abonos de clientes.</p></div><span class="debtpill">${pending.length} pendientes · ${money(total)}</span></div>
- <div class="cards">${card('Saldo pendiente',money(total))}${card('Cuentas activas',pending.length)}${card('Cuentas pagadas',state.credits.filter(c=>c.status==='pagado').length)}</div>
- <section class="tablewrap"><table><thead><tr><th>Cliente</th><th>Pedido</th><th>Original</th><th>Saldo</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.credits.map(c=>`<tr><td><b>${esc(c.customers?.name||'Cliente')}</b><small>${esc(c.customers?.phone||'')}</small></td><td>#${c.orders?.folio||'—'}</td><td>${money(c.original_amount)}</td><td><b>${money(c.balance)}</b></td><td>${c.due_date||'—'}</td><td><span class="badge ${c.status==='pagado'?'green':c.status==='parcial'?'':'red'}">${esc(c.status)}</span></td><td>${Number(c.balance)>0?`<button class="primary" data-creditpay="${c.id}">Registrar abono</button>`:''}</td></tr>`).join('')}</tbody></table></section>`;
+ const pending=state.credits.filter(c=>Number(c.balance)>0),total=pending.reduce((a,c)=>a+Number(c.balance),0);
+ const overdue=pending.filter(c=>c.due_date&&new Date(c.due_date+'T23:59:59')<new Date()).length;
+ return `<div class="pagehead"><div><h1>Ventas fiadas</h1><p class="muted">Consulta saldos, vencimientos y registra abonos sin perder el historial.</p></div><span class="debtpill">${pending.length} cuentas pendientes</span></div>
+ <div class="cards creditcards">${card('Saldo por cobrar',money(total))}${card('Clientes con saldo',new Set(pending.map(c=>c.customer_id)).size)}${card('Vencidas',overdue)}${card('Liquidadas',state.credits.filter(c=>c.status==='pagado').length)}</div>
+ <section class="creditpanel"><div class="catalogtoolbar"><div class="search grow"><span>⌕</span><input id="creditSearch" placeholder="Buscar cliente o folio..."></div><select id="creditStatus"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="parcial">Parcial</option><option value="pagado">Pagado</option></select></div><div id="creditContent">${creditRows(state.credits)}</div></section>`;
 }
+function creditRows(items){
+ if(!items.length)return `<div class="empty"><b>Sin ventas fiadas</b><span>Las ventas a crédito aparecerán aquí.</span></div>`;
+ return `<div class="creditlist">${items.map(c=>{const pct=Math.max(0,Math.min(100,100-(Number(c.balance)/Math.max(Number(c.original_amount),1)*100)));return `<article class="credititem"><div class="creditmain"><div class="creditperson"><div class="clientavatar">${esc(c.customers?.name||'C').slice(0,1).toUpperCase()}</div><div><b>${esc(c.customers?.name||'Cliente')}</b><span>${esc(c.customers?.phone||'Sin teléfono')} · Pedido #${c.orders?.folio||'—'}</span></div></div><span class="badge ${c.status==='pagado'?'green':c.status==='parcial'?'':'red'}">${esc(c.status)}</span></div><div class="creditnumbers"><div><small>Importe</small><b>${money(c.original_amount)}</b></div><div><small>Saldo</small><strong>${money(c.balance)}</strong></div><div><small>Vencimiento</small><b>${c.due_date||'Sin fecha'}</b></div></div><div class="progress"><i style="width:${pct}%"></i></div><div class="creditfoot"><small>${Math.round(pct)}% liquidado · ${(c.credit_payments||[]).length} abono(s)</small>${Number(c.balance)>0?`<button class="primary" data-creditpay="${c.id}">Registrar abono</button>`:'<span class="paidmark">✓ Liquidado</span>'}</div></article>`}).join('')}</div>`;
+}
+function filterCredits(){
+ const q=($('#creditSearch')?.value||'').toLowerCase(),status=$('#creditStatus')?.value||'';
+ const items=state.credits.filter(c=>(!status||c.status===status)&&(!q||(c.customers?.name||'').toLowerCase().includes(q)||String(c.orders?.folio||'').includes(q)));
+ $('#creditContent').innerHTML=creditRows(items);bindCreditRows();
+}
+function bindCreditRows(){document.querySelectorAll('[data-creditpay]').forEach(b=>b.onclick=()=>openCreditPayment(b.dataset.creditpay))}
 function openCreditPayment(id){
  const c=state.credits.find(x=>x.id===id);if(!c)return;
- document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal smallmodal"><div class="modalhead"><div><small>ABONO A FIADO</small><h2>${esc(c.customers?.name||'Cliente')}</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="debtbox"><span>Saldo actual</span><strong>${money(c.balance)}</strong></div>${field('Monto del abono','creditAmount',c.balance,'number')}${field('Nota','creditNote','','text','Opcional')}<label>Método<select id="creditMethod"><option>efectivo</option><option>tarjeta</option><option>transferencia</option></select></label></div><div class="modalfoot"><button id="cancelCredit">Cancelar</button><button class="primary" id="saveCredit">Registrar abono</button></div></div></div>`);
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal smallmodal"><div class="modalhead"><div><small>ABONO A FIADO</small><h2>${esc(c.customers?.name||'Cliente')}</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="creditreceipt"><div><small>Pedido</small><b>#${c.orders?.folio||'—'}</b></div><div><small>Deuda original</small><b>${money(c.original_amount)}</b></div><div><small>Saldo actual</small><strong>${money(c.balance)}</strong></div></div>${field('Monto a abonar *','creditAmount',c.balance,'number')}${field('Nota','creditNote','','text','Opcional')}<label>Método<select id="creditMethod"><option>efectivo</option><option>tarjeta</option><option>transferencia</option></select></label></div><div class="modalfoot"><button id="cancelCredit">Cancelar</button><button class="primary" id="saveCredit">Registrar abono</button></div></div></div>`);
  $('#modalClose').onclick=$('#cancelCredit').onclick=closeModal;$('#saveCredit').onclick=()=>saveCreditPayment(c);
 }
 async function saveCreditPayment(c){
@@ -117,11 +162,16 @@ function bind(){
  document.querySelectorAll('[data-status]').forEach(s=>s.onchange=()=>setStatus(s.dataset.status,s.value));
  document.querySelectorAll('[data-sold]').forEach(b=>b.onclick=()=>toggleSold(b.dataset.sold));
  if($('#saveOrder'))$('#saveOrder').onclick=openOrderModal;
- if($('#newProduct'))$('#newProduct').onclick=newProduct;
+ if($('#newProduct'))$('#newProduct').onclick=()=>openProductModal();
+ bindCatalogRows();
+ if($('#catalogSearch'))$('#catalogSearch').oninput=filterCatalog;
+ if($('#catalogCategory'))$('#catalogCategory').onchange=filterCatalog;
+ if($('#creditSearch'))$('#creditSearch').oninput=filterCredits;
+ if($('#creditStatus'))$('#creditStatus').onchange=filterCredits;
  if($('#openCash'))$('#openCash').onclick=openCash;
  if($('#closeCash'))$('#closeCash').onclick=closeCash;
  if($('#pdfMenu'))$('#pdfMenu').onclick=pdfMenu;
- document.querySelectorAll('[data-creditpay]').forEach(b=>b.onclick=()=>openCreditPayment(b.dataset.creditpay));
+ bindCreditRows();
  if($('#saveSettings'))$('#saveSettings').onclick=saveSettings;
  if($('#clearLogo'))$('#clearLogo').onclick=()=>{state.settings.logo_url='';render()};
  if($('#clearWatermark'))$('#clearWatermark').onclick=()=>{state.settings.watermark_url='';render()};
@@ -133,29 +183,51 @@ function field(label,id,value='',type='text',placeholder=''){return `<label>${la
 function openOrderModal(){
  if(!state.cart.length)return toast('Agrega productos a la comanda');
  const total=state.cart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
- const delivery=state.type==='domicilio';
- document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal ordermodal">
- <div class="modalhead"><div><small>CONFIRMAR COMANDA</small><h2>Resumen del pedido</h2></div><button class="iconbtn" id="modalClose">×</button></div>
- <div class="modalbody"><div class="checkoutgrid"><div>
- <div class="formsection"><h3>Servicio</h3><div class="seg">${['mesa','llevar','domicilio'].map(x=>`<button type="button" data-modaltype="${x}" class="${state.type===x?'on':''}">${x}</button>`).join('')}</div>
- <div id="serviceFields">${serviceFields()}</div></div>
- <div class="formsection"><h3>Pago</h3><div class="paymentgrid">${['efectivo','tarjeta','transferencia','fiado'].map(x=>`<label class="paychoice"><input type="radio" name="paymethod" value="${x}" ${x==='efectivo'?'checked':''}><span>${x==='fiado'?'◷ ':''}${x}</span></label>`).join('')}</div>
- <div id="creditFields" class="hidden">${field('Fecha compromiso','dueDate','','date')}<p class="hint">El cliente es obligatorio para registrar un fiado.</p></div></div>
- ${field('Notas del pedido','orderNotes','','text','Ej. salsa aparte, sin cebolla...')}
- </div><aside class="ordersummary"><h3>Tu comanda</h3>${state.cart.map(x=>`<div class="sumrow"><span>${x.qty} × ${esc(x.name)}</span><b>${money(Number(x.price)*x.qty)}</b></div>`).join('')}<div class="sumtotal"><span>Total</span><strong>${money(total)}</strong></div></aside></div></div>
- <div class="modalfoot"><button id="cancelOrder">Cancelar</button><button class="primary" id="confirmOrder">Confirmar pedido · ${money(total)}</button></div></div></div>`);
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><form class="modal ordermodal singleform" id="orderForm">
+ <div class="modalhead"><div><small>NUEVA COMANDA</small><h2>Datos del pedido</h2><p>Completa la información y confirma la comanda.</p></div><button type="button" class="iconbtn" id="modalClose">×</button></div>
+ <div class="modalbody">
+   <div class="singleordergrid">
+    <div class="orderformfields">
+      <div class="formsection">
+       <h3>1. Tipo de servicio</h3>
+       <div class="seg servicepicker">${['mesa','llevar','domicilio'].map(x=>`<button type="button" data-modaltype="${x}" class="${state.type===x?'on':''}">${x==='mesa'?'Mesa':x==='llevar'?'Para llevar':'Domicilio'}</button>`).join('')}</div>
+       <div id="serviceFields" class="adaptivefields">${serviceFields()}</div>
+      </div>
+      <div class="formsection">
+       <h3>2. Datos adicionales</h3>
+       <label>Notas de la comanda<textarea id="orderNotes" rows="3" placeholder="Ej. sin cebolla, salsa aparte, indicaciones especiales..."></textarea></label>
+      </div>
+      <div class="formsection">
+       <h3>3. Forma de pago</h3>
+       <div class="paymentgrid">${['efectivo','tarjeta','transferencia','fiado'].map(x=>`<label class="paychoice"><input type="radio" name="paymethod" value="${x}" ${x==='efectivo'?'checked':''}><span>${x==='fiado'?'◷ ':''}${x}</span></label>`).join('')}</div>
+       <div id="creditFields" class="creditinline hidden">${field('Fecha compromiso','dueDate','','date')}<p class="hint">Para fiado debes capturar el nombre del cliente.</p></div>
+      </div>
+    </div>
+    <aside class="ordersummary">
+      <div class="summaryhead"><div><small>RESUMEN</small><h3>Comanda actual</h3></div><span>${state.cart.reduce((a,x)=>a+x.qty,0)} artículos</span></div>
+      <div class="summaryitems">${state.cart.map(x=>`<div class="sumrow"><div><b>${x.qty} × ${esc(x.name)}</b><small>${money(x.price)} c/u</small></div><strong>${money(Number(x.price)*x.qty)}</strong></div>`).join('')}</div>
+      <div class="sumtotal"><span>Total</span><strong>${money(total)}</strong></div>
+    </aside>
+   </div>
+ </div>
+ <div class="modalfoot"><button type="button" id="cancelOrder">Cancelar</button><button type="submit" class="primary" id="confirmOrder">Crear comanda · ${money(total)}</button></div>
+ </form></div>`);
  bindOrderModal();
 }
 function serviceFields(){
- if(state.type==='mesa') return `<label>Mesa<select id="modalTable"><option value="">Seleccionar mesa</option>${state.tables.map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label><div id="customerCommon">${field('Cliente (opcional)','customerName','','text','Nombre del cliente')}${field('Teléfono','customerPhone','','tel','999 000 0000')}</div>`;
- if(state.type==='domicilio') return `${field('Cliente','customerName','','text','Nombre completo')}${field('Teléfono','customerPhone','','tel','999 000 0000')}${field('Dirección','customerAddress','','text','Calle, número y colonia')}${field('Referencia','customerReference','','text','Referencia de entrega')}`;
- return `${field('Cliente (opcional)','customerName','','text','Nombre del cliente')}${field('Teléfono','customerPhone','','tel','999 000 0000')}`;
+ if(state.type==='mesa') return `<div class="fieldgrid"><label>Mesa *<select id="modalTable" required><option value="">Seleccionar mesa</option>${state.tables.map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label>${field('Cliente','customerName','','text','Opcional')}${field('Teléfono','customerPhone','','tel','Opcional')}</div>`;
+ if(state.type==='domicilio') return `<div class="fieldgrid">${field('Cliente *','customerName','','text','Nombre completo')}${field('Teléfono *','customerPhone','','tel','999 000 0000')}${field('Dirección *','customerAddress','','text','Calle, número y colonia')}${field('Referencia','customerReference','','text','Color de casa, cruzamientos, etc.')}</div>`;
+ return `<div class="fieldgrid">${field('Cliente','customerName','','text','Opcional')}${field('Teléfono','customerPhone','','tel','Opcional')}</div>`;
 }
 function bindOrderModal(){
  $('#modalClose').onclick=$('#cancelOrder').onclick=closeModal;
- document.querySelectorAll('[data-modaltype]').forEach(b=>b.onclick=()=>{state.type=b.dataset.modaltype;document.querySelectorAll('[data-modaltype]').forEach(x=>x.classList.toggle('on',x.dataset.modaltype===state.type));$('#serviceFields').innerHTML=serviceFields()});
+ document.querySelectorAll('[data-modaltype]').forEach(b=>b.onclick=()=>{
+   state.type=b.dataset.modaltype;
+   document.querySelectorAll('[data-modaltype]').forEach(x=>x.classList.toggle('on',x.dataset.modaltype===state.type));
+   $('#serviceFields').innerHTML=serviceFields();
+ });
  document.querySelectorAll('input[name=paymethod]').forEach(r=>r.onchange=()=>$('#creditFields').classList.toggle('hidden',r.value!=='fiado'));
- $('#confirmOrder').onclick=confirmOrder;
+ $('#orderForm').onsubmit=e=>{e.preventDefault();confirmOrder()};
 }
 async function getOrCreateCustomer(required=false){
  const name=$('#customerName')?.value.trim()||'',phone=$('#customerPhone')?.value.trim()||'',address=$('#customerAddress')?.value.trim()||'',reference=$('#customerReference')?.value.trim()||'';
@@ -168,6 +240,11 @@ async function confirmOrder(){
  const btn=$('#confirmOrder');btn.disabled=true;btn.textContent='Guardando…';
  try{
    const method=document.querySelector('input[name=paymethod]:checked')?.value||'efectivo';
+   if(state.type==='domicilio'){
+     if(!$('#customerName')?.value.trim())throw new Error('Ingresa el nombre del cliente.');
+     if(!$('#customerPhone')?.value.trim())throw new Error('Ingresa el teléfono del cliente.');
+     if(!$('#customerAddress')?.value.trim())throw new Error('Ingresa la dirección de entrega.');
+   }
    const customer_id=await getOrCreateCustomer(method==='fiado'||state.type==='domicilio');
    const table_id=state.type==='mesa'?($('#modalTable')?.value||state.table||null):null;
    if(state.type==='mesa'&&!table_id)throw new Error('Selecciona una mesa.');
@@ -182,7 +259,7 @@ async function confirmOrder(){
 }
 async function pay(id){const o=state.orders.find(x=>x.id===id);if(!o)return;const method=prompt('Método: efectivo, tarjeta, transferencia u otro','efectivo');if(!method)return;let r=await db.from('payments').insert({order_id:o.id,method,amount:o.total});if(r.error)return toast(r.error.message);await db.from('orders').update({status:'pagado',updated_at:new Date().toISOString()}).eq('id',o.id);toast('Venta cobrada');load()}
 async function setStatus(id,status){await db.from('orders').update({status,updated_at:new Date().toISOString()}).eq('id',id);load()}
-async function newProduct(){const name=prompt('Nombre del producto');if(!name)return;const price=Number(prompt('Precio','0'));const r=await db.from('products').insert({name,price,category_id:state.cats[0]?.id||null});if(r.error)return toast(r.error.message);toast('Producto creado');load()}
+function newProduct(){openProductModal()}
 async function toggleSold(id){const p=state.products.find(x=>x.id===id);if(!p)return;await db.from('products').update({sold_out:!p.sold_out}).eq('id',id);load()}
 async function openCash(){const n=Number(prompt('Fondo inicial','0'));const r=await db.from('cash_sessions').insert({opening_amount:n}).select().single();if(r.error)return toast(r.error.message);state.cash=r.data;toast('Caja abierta');render()}
 async function closeCash(){const n=Number(prompt('Efectivo contado','0'));const r=await db.from('cash_sessions').update({status:'cerrada',closed_at:new Date().toISOString(),closing_counted:n}).eq('id',state.cash.id);if(r.error)return toast(r.error.message);state.cash=null;toast('Caja cerrada');render()}
