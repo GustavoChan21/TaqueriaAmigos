@@ -4,27 +4,27 @@ const money=n=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).
 const today=()=>new Date().toISOString().slice(0,10);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
-const state={page:'Inicio',cats:[],products:[],tables:[],orders:[],cart:[],cat:'Todos',type:'mesa',table:'',q:'',cash:null,settings:{business_name:'Taquería Los Amigos',subtitle:'Nuestro Menú'}};
+const state={page:'Inicio',cats:[],products:[],tables:[],orders:[],credits:[],cart:[],cat:'Todos',type:'mesa',table:'',q:'',cash:null,settings:{business_name:'Taquería Los Amigos',subtitle:'Nuestro Menú',phone:'',address:'',tax_id:'',email:'',footer_text:'Gracias por tu preferencia',logo_url:'',watermark_url:'',social_text:''}};
 
-function icon(name){const m={Inicio:'▦',Comandero:'🍽',Pedidos:'▤',Mesas:'▦',Caja:'▣',Productos:'▧','Menú':'☰',Ventas:'↻','Configuración':'⚙'};return m[name]||'•'}
+function icon(name){const m={Inicio:'▦',Comandero:'🍽',Pedidos:'▤',Mesas:'▦',Caja:'▣',Fiado:'◷',Productos:'▧','Menú':'☰',Ventas:'↻','Configuración':'⚙'};return m[name]||'•'}
 function toast(msg){let t=$('.toast');if(!t){t=document.createElement('div');t.className='toast';document.body.appendChild(t)}t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2600)}
 async function load(){
   try{
-    const [a,b,c,d,e,f]=await Promise.all([
+    const [a,b,c,d,e,f,g]=await Promise.all([
       db.from('categories').select('*').order('sort_order'),
       db.from('products').select('*').order('sort_order'),
       db.from('dining_tables').select('*').order('name'),
       db.from('orders').select('*,order_items(*),payments(*)').order('created_at',{ascending:false}).limit(500),
       db.from('cash_sessions').select('*').eq('status','abierta').maybeSingle(),
-      db.from('menu_settings').select('*').eq('id',1).single()
+      db.from('menu_settings').select('*').eq('id',1).single(), db.from('credit_accounts').select('*,customers(*),orders(folio,total),credit_payments(*)').order('created_at',{ascending:false})
     ]);
     state.cats=a.data||[]; state.products=b.data||[]; state.tables=c.data||[]; state.orders=d.data||[];
-    state.cash=e.data||null; if(f.data) state.settings=f.data;
+    state.cash=e.data||null; if(f.data) state.settings={...state.settings,...f.data}; state.credits=g.data||[];
     render();
   }catch(e){console.error(e);$('#app').innerHTML=`<main><section><h2>No se pudo cargar el sistema</h2><p>${esc(e.message)}</p></section></main>`}
 }
 function shell(content){
- const nav=['Inicio','Comandero','Pedidos','Mesas','Caja','Productos','Menú','Ventas','Configuración'];
+ const nav=['Inicio','Comandero','Pedidos','Mesas','Caja','Fiado','Productos','Menú','Ventas','Configuración'];
  return `<div class="app"><nav><div class="brand"><div>🌮</div><span><b>LOS AMIGOS</b><small>Taquería · POS</small></span></div>
  ${nav.map(n=>`<button data-nav="${n}" class="${state.page===n?'active':''}"><span>${icon(n)}</span>${n}</button>`).join('')}</nav>
  <main>${content}</main></div>`;
@@ -40,7 +40,7 @@ function ordersTable(data){
 }
 function dashboard(){
  const p=paid(), s=sales();
- return `<h1>Resumen del día</h1><div class="cards">${card('Venta total',money(s))}${card('Pedidos',todays().length)}${card('Ticket promedio',money(p.length?s/p.length:0))}${card('Caja',state.cash?'Abierta':'Cerrada')}</div>
+ return `<h1>Resumen del día</h1><div class="cards">${card('Venta total',money(s))}${card('Pedidos',todays().length)}${card('Ticket promedio',money(p.length?s/p.length:0))}${card('Fiado pendiente',money(state.credits.reduce((a,c)=>a+Number(c.balance||0),0)))}</div>
  <section><h2>Ventas por tipo</h2><div class="split">${['mesa','llevar','domicilio'].map(t=>`<div class="metric"><b>${t.toUpperCase()}</b><span>${money(p.filter(o=>o.order_type===t).reduce((a,o)=>a+Number(o.total),0))}</span></div>`).join('')}</div></section>
  <section><h2>Últimos pedidos</h2>${ordersTable(todays().slice(0,8))}</section>`;
 }
@@ -70,11 +70,37 @@ function cash(){
 function salesHistory(){
  return `<h1>Histórico de ventas</h1><section class="tablewrap"><table><thead><tr><th>Fecha</th><th>Folio</th><th>Tipo</th><th>Estado</th><th>Total</th></tr></thead><tbody>${state.orders.map(o=>`<tr><td>${new Date(o.created_at).toLocaleString('es-MX')}</td><td>#${o.folio}</td><td>${esc(o.order_type)}</td><td><span class="badge">${esc(o.status)}</span></td><td><b>${money(o.total)}</b></td></tr>`).join('')}</tbody></table></section>`;
 }
-function config(){
- return `<h1>Configuración</h1><section><label>Nombre del negocio<input id="businessName" value="${esc(state.settings.business_name)}"></label><label>Subtítulo del menú<input id="subtitle" value="${esc(state.settings.subtitle||'')}"></label><button class="primary" id="saveSettings">Guardar configuración</button></section>`;
+
+function fiado(){
+ const pending=state.credits.filter(c=>Number(c.balance)>0), total=pending.reduce((a,c)=>a+Number(c.balance),0);
+ return `<div class="titlebar"><div><h1>Fiado</h1><p class="muted">Control de adeudos y abonos de clientes.</p></div><span class="debtpill">${pending.length} pendientes · ${money(total)}</span></div>
+ <div class="cards">${card('Saldo pendiente',money(total))}${card('Cuentas activas',pending.length)}${card('Cuentas pagadas',state.credits.filter(c=>c.status==='pagado').length)}</div>
+ <section class="tablewrap"><table><thead><tr><th>Cliente</th><th>Pedido</th><th>Original</th><th>Saldo</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.credits.map(c=>`<tr><td><b>${esc(c.customers?.name||'Cliente')}</b><small>${esc(c.customers?.phone||'')}</small></td><td>#${c.orders?.folio||'—'}</td><td>${money(c.original_amount)}</td><td><b>${money(c.balance)}</b></td><td>${c.due_date||'—'}</td><td><span class="badge ${c.status==='pagado'?'green':c.status==='parcial'?'':'red'}">${esc(c.status)}</span></td><td>${Number(c.balance)>0?`<button class="primary" data-creditpay="${c.id}">Registrar abono</button>`:''}</td></tr>`).join('')}</tbody></table></section>`;
 }
+function openCreditPayment(id){
+ const c=state.credits.find(x=>x.id===id);if(!c)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal smallmodal"><div class="modalhead"><div><small>ABONO A FIADO</small><h2>${esc(c.customers?.name||'Cliente')}</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="debtbox"><span>Saldo actual</span><strong>${money(c.balance)}</strong></div>${field('Monto del abono','creditAmount',c.balance,'number')}${field('Nota','creditNote','','text','Opcional')}<label>Método<select id="creditMethod"><option>efectivo</option><option>tarjeta</option><option>transferencia</option></select></label></div><div class="modalfoot"><button id="cancelCredit">Cancelar</button><button class="primary" id="saveCredit">Registrar abono</button></div></div></div>`);
+ $('#modalClose').onclick=$('#cancelCredit').onclick=closeModal;$('#saveCredit').onclick=()=>saveCreditPayment(c);
+}
+async function saveCreditPayment(c){
+ const amount=Number($('#creditAmount').value);if(!amount||amount<=0||amount>Number(c.balance))return toast('Ingresa un monto válido');
+ const r=await db.from('credit_payments').insert({credit_account_id:c.id,amount,method:$('#creditMethod').value,notes:$('#creditNote').value.trim()});if(r.error)return toast(r.error.message);
+ const balance=Number(c.balance)-amount,status=balance<=0?'pagado':'parcial';
+ await db.from('credit_accounts').update({balance,status,updated_at:new Date().toISOString()}).eq('id',c.id);
+ if(balance<=0){await db.from('orders').update({payment_status:'pagado',status:'pagado'}).eq('id',c.order_id)}
+ closeModal();toast('Abono registrado');load();
+}
+function config(){
+ const s=state.settings;
+ return `<div class="titlebar"><div><h1>Configuración del local</h1><p class="muted">Personaliza la información y apariencia del menú PDF.</p></div></div>
+ <div class="settingsgrid"><section><h2>Datos del negocio</h2>${field('Nombre comercial','businessName',s.business_name)}${field('Subtítulo','subtitle',s.subtitle||'')}${field('Teléfono','shopPhone',s.phone||'')}${field('Correo','shopEmail',s.email||'','email')}${field('Dirección','shopAddress',s.address||'')}${field('RFC / identificación fiscal','taxId',s.tax_id||'')}${field('Redes / contacto','socialText',s.social_text||'')}${field('Pie del PDF','footerText',s.footer_text||'')}</section>
+ <section><h2>Identidad visual</h2><div class="uploadbox"><div class="assetpreview">${s.logo_url?`<img src="${s.logo_url}" alt="Logo">`:'<span>LOGO</span>'}</div><label>Logo del negocio<input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"></label><button id="clearLogo">Quitar logo</button></div>
+ <div class="uploadbox"><div class="assetpreview watermarkprev">${s.watermark_url?`<img src="${s.watermark_url}" alt="Marca de agua">`:'<span>MARCA DE AGUA</span>'}</div><label>Imagen de fondo / marca de agua<input id="watermarkFile" type="file" accept="image/png,image/jpeg,image/webp"></label><button id="clearWatermark">Quitar imagen</button></div></section></div>
+ <div class="stickyactions"><button class="primary" id="saveSettings">Guardar configuración</button></div>`;
+}
+function fileData(input){return new Promise((res,rej)=>{const f=input.files?.[0];if(!f)return res(null);if(f.size>1500000)return rej(new Error('La imagen debe pesar menos de 1.5 MB'));const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f)})}
 function render(){
- let content=state.page==='Inicio'?dashboard():state.page==='Comandero'?comandero():state.page==='Pedidos'?`<h1>Pedidos</h1><section>${ordersTable(state.orders.filter(o=>!['pagado','cancelado'].includes(o.status)))}</section>`:state.page==='Mesas'?mesas():state.page==='Caja'?cash():state.page==='Productos'?products():state.page==='Menú'?menu():state.page==='Ventas'?salesHistory():config();
+ let content=state.page==='Inicio'?dashboard():state.page==='Comandero'?comandero():state.page==='Pedidos'?`<h1>Pedidos</h1><section>${ordersTable(state.orders.filter(o=>!['pagado','cancelado'].includes(o.status)))}</section>`:state.page==='Mesas'?mesas():state.page==='Caja'?cash():state.page==='Fiado'?fiado():state.page==='Productos'?products():state.page==='Menú'?menu():state.page==='Ventas'?salesHistory():config();
  $('#app').innerHTML=shell(content); bind();
 }
 function bind(){
@@ -90,30 +116,69 @@ function bind(){
  document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>pay(b.dataset.pay));
  document.querySelectorAll('[data-status]').forEach(s=>s.onchange=()=>setStatus(s.dataset.status,s.value));
  document.querySelectorAll('[data-sold]').forEach(b=>b.onclick=()=>toggleSold(b.dataset.sold));
- if($('#saveOrder'))$('#saveOrder').onclick=saveOrder;
+ if($('#saveOrder'))$('#saveOrder').onclick=openOrderModal;
  if($('#newProduct'))$('#newProduct').onclick=newProduct;
  if($('#openCash'))$('#openCash').onclick=openCash;
  if($('#closeCash'))$('#closeCash').onclick=closeCash;
  if($('#pdfMenu'))$('#pdfMenu').onclick=pdfMenu;
+ document.querySelectorAll('[data-creditpay]').forEach(b=>b.onclick=()=>openCreditPayment(b.dataset.creditpay));
  if($('#saveSettings'))$('#saveSettings').onclick=saveSettings;
+ if($('#clearLogo'))$('#clearLogo').onclick=()=>{state.settings.logo_url='';render()};
+ if($('#clearWatermark'))$('#clearWatermark').onclick=()=>{state.settings.watermark_url='';render()};
 }
 function addProduct(id){const p=state.products.find(x=>x.id===id);if(!p)return;const x=state.cart.find(i=>i.id===id);if(x)x.qty++;else state.cart.push({...p,qty:1,notes:''});render()}
-async function saveOrder(){
- if(!state.cart.length)return toast('Agrega productos');
- if(state.type==='mesa'&&!state.table)return toast('Selecciona una mesa');
- let customer_id=null;
- if(state.type==='domicilio'){
-   const name=prompt('Nombre del cliente');if(!name)return;
-   const phone=prompt('Teléfono')||'',address=prompt('Dirección')||'';
-   const c=await db.from('customers').insert({name,phone,address}).select().single();
-   if(c.error)return toast(c.error.message);customer_id=c.data.id;
- }
+
+function closeModal(){const m=$('.modalback');if(m)m.remove()}
+function field(label,id,value='',type='text',placeholder=''){return `<label>${label}<input id="${id}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}"></label>`}
+function openOrderModal(){
+ if(!state.cart.length)return toast('Agrega productos a la comanda');
  const total=state.cart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
- const o=await db.from('orders').insert({order_type:state.type,table_id:state.type==='mesa'?state.table:null,customer_id,status:'pendiente',subtotal:total,total}).select().single();
- if(o.error)return toast(o.error.message);
- const r=await db.from('order_items').insert(state.cart.map(x=>({order_id:o.data.id,product_id:x.id,product_name:x.name,quantity:x.qty,unit_price:x.price,line_total:Number(x.price)*x.qty,notes:x.notes||''})));
- if(r.error)return toast(r.error.message);
- state.cart=[];state.table='';toast('Comanda creada');await load();
+ const delivery=state.type==='domicilio';
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal ordermodal">
+ <div class="modalhead"><div><small>CONFIRMAR COMANDA</small><h2>Resumen del pedido</h2></div><button class="iconbtn" id="modalClose">×</button></div>
+ <div class="modalbody"><div class="checkoutgrid"><div>
+ <div class="formsection"><h3>Servicio</h3><div class="seg">${['mesa','llevar','domicilio'].map(x=>`<button type="button" data-modaltype="${x}" class="${state.type===x?'on':''}">${x}</button>`).join('')}</div>
+ <div id="serviceFields">${serviceFields()}</div></div>
+ <div class="formsection"><h3>Pago</h3><div class="paymentgrid">${['efectivo','tarjeta','transferencia','fiado'].map(x=>`<label class="paychoice"><input type="radio" name="paymethod" value="${x}" ${x==='efectivo'?'checked':''}><span>${x==='fiado'?'◷ ':''}${x}</span></label>`).join('')}</div>
+ <div id="creditFields" class="hidden">${field('Fecha compromiso','dueDate','','date')}<p class="hint">El cliente es obligatorio para registrar un fiado.</p></div></div>
+ ${field('Notas del pedido','orderNotes','','text','Ej. salsa aparte, sin cebolla...')}
+ </div><aside class="ordersummary"><h3>Tu comanda</h3>${state.cart.map(x=>`<div class="sumrow"><span>${x.qty} × ${esc(x.name)}</span><b>${money(Number(x.price)*x.qty)}</b></div>`).join('')}<div class="sumtotal"><span>Total</span><strong>${money(total)}</strong></div></aside></div></div>
+ <div class="modalfoot"><button id="cancelOrder">Cancelar</button><button class="primary" id="confirmOrder">Confirmar pedido · ${money(total)}</button></div></div></div>`);
+ bindOrderModal();
+}
+function serviceFields(){
+ if(state.type==='mesa') return `<label>Mesa<select id="modalTable"><option value="">Seleccionar mesa</option>${state.tables.map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label><div id="customerCommon">${field('Cliente (opcional)','customerName','','text','Nombre del cliente')}${field('Teléfono','customerPhone','','tel','999 000 0000')}</div>`;
+ if(state.type==='domicilio') return `${field('Cliente','customerName','','text','Nombre completo')}${field('Teléfono','customerPhone','','tel','999 000 0000')}${field('Dirección','customerAddress','','text','Calle, número y colonia')}${field('Referencia','customerReference','','text','Referencia de entrega')}`;
+ return `${field('Cliente (opcional)','customerName','','text','Nombre del cliente')}${field('Teléfono','customerPhone','','tel','999 000 0000')}`;
+}
+function bindOrderModal(){
+ $('#modalClose').onclick=$('#cancelOrder').onclick=closeModal;
+ document.querySelectorAll('[data-modaltype]').forEach(b=>b.onclick=()=>{state.type=b.dataset.modaltype;document.querySelectorAll('[data-modaltype]').forEach(x=>x.classList.toggle('on',x.dataset.modaltype===state.type));$('#serviceFields').innerHTML=serviceFields()});
+ document.querySelectorAll('input[name=paymethod]').forEach(r=>r.onchange=()=>$('#creditFields').classList.toggle('hidden',r.value!=='fiado'));
+ $('#confirmOrder').onclick=confirmOrder;
+}
+async function getOrCreateCustomer(required=false){
+ const name=$('#customerName')?.value.trim()||'',phone=$('#customerPhone')?.value.trim()||'',address=$('#customerAddress')?.value.trim()||'',reference=$('#customerReference')?.value.trim()||'';
+ if(required&&!name)throw new Error('Ingresa el nombre del cliente para registrar el fiado.');
+ if(!name&&!phone)return null;
+ if(phone){const found=await db.from('customers').select('*').eq('phone',phone).limit(1);if(found.data?.[0]){await db.from('customers').update({name:name||found.data[0].name,address:address||found.data[0].address,reference:reference||found.data[0].reference}).eq('id',found.data[0].id);return found.data[0].id}}
+ const c=await db.from('customers').insert({name:name||'Cliente',phone,address,reference}).select().single();if(c.error)throw c.error;return c.data.id;
+}
+async function confirmOrder(){
+ const btn=$('#confirmOrder');btn.disabled=true;btn.textContent='Guardando…';
+ try{
+   const method=document.querySelector('input[name=paymethod]:checked')?.value||'efectivo';
+   const customer_id=await getOrCreateCustomer(method==='fiado'||state.type==='domicilio');
+   const table_id=state.type==='mesa'?($('#modalTable')?.value||state.table||null):null;
+   if(state.type==='mesa'&&!table_id)throw new Error('Selecciona una mesa.');
+   const total=state.cart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
+   const notes=$('#orderNotes')?.value.trim()||'';
+   const o=await db.from('orders').insert({order_type:state.type,table_id,customer_id,status:method==='fiado'?'entregado':'pendiente',subtotal:total,total,notes,payment_status:method==='fiado'?'fiado':'pendiente',credit_due_date:method==='fiado'?($('#dueDate')?.value||null):null}).select().single();
+   if(o.error)throw o.error;
+   const ir=await db.from('order_items').insert(state.cart.map(x=>({order_id:o.data.id,product_id:x.id,product_name:x.name,quantity:x.qty,unit_price:x.price,line_total:Number(x.price)*x.qty,notes:x.notes||''})));if(ir.error)throw ir.error;
+   if(method==='fiado'){const cr=await db.from('credit_accounts').insert({order_id:o.data.id,customer_id,original_amount:total,balance:total,due_date:$('#dueDate')?.value||null});if(cr.error)throw cr.error}
+   state.cart=[];state.table='';closeModal();toast(method==='fiado'?'Fiado registrado correctamente':'Comanda creada correctamente');await load();
+ }catch(e){toast(e.message||'No se pudo guardar');btn.disabled=false;btn.textContent='Confirmar pedido'}
 }
 async function pay(id){const o=state.orders.find(x=>x.id===id);if(!o)return;const method=prompt('Método: efectivo, tarjeta, transferencia u otro','efectivo');if(!method)return;let r=await db.from('payments').insert({order_id:o.id,method,amount:o.total});if(r.error)return toast(r.error.message);await db.from('orders').update({status:'pagado',updated_at:new Date().toISOString()}).eq('id',o.id);toast('Venta cobrada');load()}
 async function setStatus(id,status){await db.from('orders').update({status,updated_at:new Date().toISOString()}).eq('id',id);load()}
@@ -121,7 +186,21 @@ async function newProduct(){const name=prompt('Nombre del producto');if(!name)re
 async function toggleSold(id){const p=state.products.find(x=>x.id===id);if(!p)return;await db.from('products').update({sold_out:!p.sold_out}).eq('id',id);load()}
 async function openCash(){const n=Number(prompt('Fondo inicial','0'));const r=await db.from('cash_sessions').insert({opening_amount:n}).select().single();if(r.error)return toast(r.error.message);state.cash=r.data;toast('Caja abierta');render()}
 async function closeCash(){const n=Number(prompt('Efectivo contado','0'));const r=await db.from('cash_sessions').update({status:'cerrada',closed_at:new Date().toISOString(),closing_counted:n}).eq('id',state.cash.id);if(r.error)return toast(r.error.message);state.cash=null;toast('Caja cerrada');render()}
-async function saveSettings(){const business_name=$('#businessName').value.trim(),subtitle=$('#subtitle').value.trim();const r=await db.from('menu_settings').update({business_name,subtitle,updated_at:new Date().toISOString()}).eq('id',1);if(r.error)return toast(r.error.message);state.settings={...state.settings,business_name,subtitle};toast('Configuración guardada');render()}
-function pdfMenu(){const {jsPDF}=window.jspdf;const d=new jsPDF();d.setFontSize(22);d.text(state.settings.business_name,105,20,{align:'center'});d.setFontSize(12);d.text(state.settings.subtitle||'Nuestro Menú',105,28,{align:'center'});let y=40;state.cats.forEach(c=>{const ps=state.products.filter(p=>p.category_id===c.id&&p.show_on_menu&&p.active);if(!ps.length)return;if(y>260){d.addPage();y=20}d.setFontSize(16);d.text(c.name,15,y);y+=8;ps.forEach(p=>{d.setFontSize(11);d.text(p.name,18,y);d.text(money(p.price),190,y,{align:'right'});y+=8})});d.save('menu-taqueria-los-amigos.pdf')}
-
+async function saveSettings(){
+ try{
+  const logo=await fileData($('#logoFile')),watermark=await fileData($('#watermarkFile'));
+  const updates={business_name:$('#businessName').value.trim(),subtitle:$('#subtitle').value.trim(),phone:$('#shopPhone').value.trim(),email:$('#shopEmail').value.trim(),address:$('#shopAddress').value.trim(),tax_id:$('#taxId').value.trim(),social_text:$('#socialText').value.trim(),footer_text:$('#footerText').value.trim(),logo_url:logo||state.settings.logo_url||'',watermark_url:watermark||state.settings.watermark_url||'',updated_at:new Date().toISOString()};
+  const r=await db.from('menu_settings').update(updates).eq('id',1);if(r.error)throw r.error;state.settings={...state.settings,...updates};toast('Configuración guardada');render();
+ }catch(e){toast(e.message)}
+}
+function pdfMenu(){
+ const {jsPDF}=window.jspdf,d=new jsPDF(),s=state.settings;
+ if(s.watermark_url){try{d.setGState(new d.GState({opacity:.07}));d.addImage(s.watermark_url,'AUTO',35,75,140,140);d.setGState(new d.GState({opacity:1}))}catch(e){}}
+ if(s.logo_url){try{d.addImage(s.logo_url,'AUTO',15,12,28,22)}catch(e){}}
+ d.setFontSize(22);d.text(s.business_name||'Taquería Los Amigos',105,20,{align:'center'});
+ d.setFontSize(10);d.text([s.subtitle,s.address,s.phone,s.email,s.tax_id?`RFC: ${s.tax_id}`:''].filter(Boolean),105,28,{align:'center'});
+ let y=48;state.cats.forEach(c=>{const ps=state.products.filter(p=>p.category_id===c.id&&p.show_on_menu&&p.active);if(!ps.length)return;if(y>255){d.addPage();y=25}d.setFontSize(15);d.text(c.name,15,y);y+=8;ps.forEach(p=>{d.setFontSize(10.5);d.text(p.name,18,y);d.text(money(p.price),190,y,{align:'right'});if(s.show_descriptions&&p.description){y+=5;d.setFontSize(8);d.text(String(p.description).slice(0,85),18,y)}y+=8})});
+ const pages=d.getNumberOfPages();for(let i=1;i<=pages;i++){d.setPage(i);d.setFontSize(8);d.text([s.social_text,s.footer_text].filter(Boolean).join(' · '),105,287,{align:'center'})}
+ d.save('menu-taqueria-los-amigos.pdf')
+}
 load();

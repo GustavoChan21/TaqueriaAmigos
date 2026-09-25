@@ -1,30 +1,16 @@
 # Taquería Los Amigos — GitHub Pages
 
-Esta versión replica la estructura del proyecto GroceryStore que funciona directamente desde la raíz.
+Versión estática lista para `Deploy from a branch → main → /(root)`.
 
-## Estructura
-- `.nojekyll`
-- `index.html`
-- `style.css`
-- `app.js`
-- `config.js`
-- `database.js`
-- `preview.html`
-- `package.json`
-- `vercel.json`
-- `schema.sql`
-- `README.md`
+## Cambios de esta versión
+- Checkout de pedido en un único modal responsive.
+- Mesa / para llevar / domicilio dentro del mismo flujo.
+- Forma de pago y fiado integrados.
+- Nuevo módulo Fiado con saldos, estados y registro de abonos.
+- Configuración ampliada del local: logo, marca de agua, teléfono, correo, dirección, RFC, redes y pie.
+- PDF de menú con branding configurado.
+- Responsive desktop/tablet/móvil.
+- Supabase actualizado para cuentas de fiado y abonos.
 
-No usa React, Vite, `src`, `dist` ni GitHub Actions. No requiere compilación.
-
-## Publicar
-1. Sube TODOS estos archivos a la raíz del repositorio `Taqueria-Los-Amigos`.
-2. GitHub → Settings → Pages.
-3. Source: `Deploy from a branch`.
-4. Branch: `main`.
-5. Folder: `/ (root)`.
-6. Custom domain: vacío.
-7. Guarda y espera el despliegue.
-
-URL:
-`https://gustavochan21.github.io/Taqueria-Los-Amigos/`
+Sube todos los archivos de este ZIP directamente a la raíz de `Taqueria-Los-Amigos`.
+En GitHub Pages deja Custom domain vacío.
