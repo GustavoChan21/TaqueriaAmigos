@@ -1,0 +1,1 @@
+-- La base de datos ya está creada en Supabase para Taquería Los Amigos.

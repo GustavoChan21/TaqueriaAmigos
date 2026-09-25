@@ -1,0 +1,6 @@
+{
+  "name": "taqueria-los-amigos",
+  "version": "2.0.0",
+  "private": true,
+  "description": "POS estático para GitHub Pages conectado a Supabase"
+}
