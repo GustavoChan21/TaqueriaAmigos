@@ -24,3 +24,18 @@ La creación de una comanda utiliza un único modal/formulario. El formulario ca
 - Responsive reforzado en POS, modal de comanda, catálogo y fiado.
 - Fiado rediseñado con KPIs, buscador, filtros, progreso de pago y modal de abono.
 - CRUD de catálogo: alta, edición, disponibilidad, mostrar en menú y eliminación/desactivación segura.
+
+
+## v6
+- Sidebar contraíble en escritorio y drawer en móvil.
+- Edición y eliminación de pedidos/comandas.
+- Edición de tipo, mesa, estado, notas y cantidades del pedido.
+- Eliminación de pedidos con limpieza de pagos, productos y fiado relacionados.
+- Fiado editable y eliminable.
+- CRUD de productos conservado y reforzado.
+
+
+## v7
+- UI/UX armonizada y mobile-first.
+- CRUD de mesas: crear, editar, activar/desactivar y eliminar.
+- Responsive reorganizado para pantallas pequeñas.

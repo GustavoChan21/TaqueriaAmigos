@@ -25,8 +25,11 @@ async function load(){
 }
 function shell(content){
  const nav=['Inicio','Comandero','Pedidos','Mesas','Caja','Fiado','Productos','Menú','Ventas','Configuración'];
- return `<div class="app"><nav><div class="brand"><div>🌮</div><span><b>LOS AMIGOS</b><small>Taquería · POS</small></span></div>
- ${nav.map(n=>`<button data-nav="${n}" class="${state.page===n?'active':''}"><span>${icon(n)}</span>${n}</button>`).join('')}</nav>
+ return `<div class="app contracted">
+ <aside class="sidebar" id="sidebar"><div class="sidebrand"><div class="brandmark">🌮</div><div class="brandcopy"><b>LOS AMIGOS</b><small>Taquería · POS</small></div><button class="collapsebtn" id="collapseSide" title="Contraer menú">‹</button></div>
+ <div class="sidenav">${nav.map(n=>`<button data-nav="${n}" class="${state.page===n?'active':''}" title="${n}"><span class="navicon">${icon(n)}</span><span class="navlabel">${n}</span></button>`).join('')}</div>
+ <div class="sidefoot"><span class="statusdot"></span><span class="navlabel">Sistema conectado</span></div></aside>
+ <div class="mobiletop"><button id="mobileMenu">☰</button><b>LOS AMIGOS</b><span>${icon(state.page)}</span></div><div class="sideoverlay" id="sideoverlay"></div>
  <main>${content}</main></div>`;
 }
 function card(t,v){return `<div class="card"><small>${t}</small><strong>${v}</strong></div>`}
@@ -35,8 +38,46 @@ function paid(){return todays().filter(o=>o.status==='pagado')}
 function sales(){return paid().reduce((s,o)=>s+Number(o.total),0)}
 function ordersTable(data){
  return `<div class="tablewrap"><table><thead><tr><th>Folio</th><th>Tipo</th><th>Detalle</th><th>Estado</th><th>Total</th><th>Acciones</th></tr></thead><tbody>
- ${data.map(o=>`<tr><td><b>#${o.folio}</b></td><td>${esc(o.order_type)}</td><td>${(o.order_items||[]).map(i=>`${i.quantity}× ${esc(i.product_name)}`).join(', ')}</td><td><span class="badge">${esc(o.status)}</span></td><td><b>${money(o.total)}</b></td><td class="actions">${o.status!=='pagado'?`<select data-status="${o.id}">${['pendiente','preparando','listo','en_camino','entregado','cancelado'].map(s=>`<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select><button class="primary" data-pay="${o.id}">Cobrar</button>`:''}</td></tr>`).join('')}
+ ${data.map(o=>`<tr><td><b>#${o.folio}</b></td><td>${esc(o.order_type)}</td><td>${(o.order_items||[]).map(i=>`${i.quantity}× ${esc(i.product_name)}`).join(', ')}</td><td><span class="badge">${esc(o.status)}</span></td><td><b>${money(o.total)}</b></td><td><div class="orderactions"><button data-editorder="${o.id}">Editar</button>${o.status!=='pagado'?`<button class="primary" data-pay="${o.id}">Cobrar</button>`:''}<button class="dangerghost" data-deleteorder="${o.id}">Eliminar</button></div></td></tr>`).join('')}
  </tbody></table></div>`;
+}
+function openEditOrder(id){
+ const o=state.orders.find(x=>x.id===id);if(!o)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><form class="modal editordermodal" id="editOrderForm"><div class="modalhead"><div><small>PEDIDO #${o.folio}</small><h2>Editar comanda</h2><p>Corrige los datos capturados por error.</p></div><button type="button" class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="fieldgrid"><label>Tipo de servicio<select id="editOrderType"><option value="mesa" ${o.order_type==='mesa'?'selected':''}>Mesa</option><option value="llevar" ${o.order_type==='llevar'?'selected':''}>Para llevar</option><option value="domicilio" ${o.order_type==='domicilio'?'selected':''}>Domicilio</option></select></label><label>Estado<select id="editOrderStatus">${['pendiente','preparando','listo','en_camino','entregado','pagado','cancelado'].map(x=>`<option value="${x}" ${o.status===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Mesa<select id="editOrderTable"><option value="">Sin mesa</option>${state.tables.filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${o.table_id===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label>${field('Notas','editOrderNotes',o.notes||'')}</div><h3>Productos</h3><div class="edititems">${(o.order_items||[]).map(i=>`<div class="edititem" data-itemrow="${i.id}"><div><b>${esc(i.product_name)}</b><small>${money(i.unit_price)} c/u</small></div><input type="number" min="1" value="${i.quantity}" data-itemqty="${i.id}"><button type="button" class="dangerghost" data-removeitem="${i.id}">Quitar</button></div>`).join('')}</div><p class="hint">El total se recalculará con las cantidades actuales.</p></div><div class="modalfoot"><button type="button" id="cancelEditOrder">Cancelar</button><button class="primary" type="submit">Guardar cambios</button></div></form></div>`);
+ $('#modalClose').onclick=$('#cancelEditOrder').onclick=closeModal;
+ document.querySelectorAll('[data-removeitem]').forEach(b=>b.onclick=()=>{const row=document.querySelector(`[data-itemrow="${b.dataset.removeitem}"]`);row.dataset.removed='1';row.style.display='none'});
+ $('#editOrderForm').onsubmit=e=>{e.preventDefault();saveOrderEdit(o)};
+}
+async function saveOrderEdit(o){
+ try{
+  let total=0;
+  for(const i of (o.order_items||[])){
+   const row=document.querySelector(`[data-itemrow="${i.id}"]`);
+   if(row?.dataset.removed==='1'){const r=await db.from('order_items').delete().eq('id',i.id);if(r.error)throw r.error;continue}
+   const qty=Math.max(1,Number(document.querySelector(`[data-itemqty="${i.id}"]`)?.value||i.quantity));
+   total+=qty*Number(i.unit_price);
+   if(qty!==Number(i.quantity)){const r=await db.from('order_items').update({quantity:qty,line_total:qty*Number(i.unit_price)}).eq('id',i.id);if(r.error)throw r.error}
+  }
+  if(total<=0)throw new Error('La comanda debe conservar al menos un producto.');
+  const payload={order_type:$('#editOrderType').value,status:$('#editOrderStatus').value,table_id:$('#editOrderTable').value||null,notes:$('#editOrderNotes').value.trim(),subtotal:total,total,updated_at:new Date().toISOString()};
+  const r=await db.from('orders').update(payload).eq('id',o.id);if(r.error)throw r.error;
+  closeModal();toast('Comanda actualizada');load();
+ }catch(e){toast(e.message)}
+}
+function confirmDeleteOrder(id){
+ const o=state.orders.find(x=>x.id===id);if(!o)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal confirmmodal"><div class="modalhead"><div><small>ELIMINAR PEDIDO</small><h2>Pedido #${o.folio}</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><p>Esta acción elimina la comanda creada por error y sus registros relacionados.</p><div class="warningbox"><b>${money(o.total)}</b><span>${esc(o.order_type)} · ${esc(o.status)}</span></div></div><div class="modalfoot"><button id="cancelDeleteOrder">Cancelar</button><button class="danger" id="doDeleteOrder">Eliminar pedido</button></div></div></div>`);
+ $('#modalClose').onclick=$('#cancelDeleteOrder').onclick=closeModal;$('#doDeleteOrder').onclick=()=>deleteOrder(o);
+}
+async function deleteOrder(o){
+ try{
+   const cr=state.credits.find(c=>c.order_id===o.id);
+   if(cr){let r=await db.from('credit_payments').delete().eq('credit_account_id',cr.id);if(r.error)throw r.error;r=await db.from('credit_accounts').delete().eq('id',cr.id);if(r.error)throw r.error}
+   let r=await db.from('payments').delete().eq('order_id',o.id);if(r.error)throw r.error;
+   r=await db.from('order_items').delete().eq('order_id',o.id);if(r.error)throw r.error;
+   r=await db.from('orders').delete().eq('id',o.id);if(r.error)throw r.error;
+   closeModal();toast('Pedido eliminado');load();
+ }catch(e){toast(e.message)}
 }
 function dashboard(){
  const p=paid(), s=sales();
@@ -48,15 +89,20 @@ function comandero(){
  const filtered=state.products.filter(p=>p.active&&(state.cat==='Todos'||state.cats.find(c=>c.id===p.category_id)?.name===state.cat)&&p.name.toLowerCase().includes(state.q.toLowerCase()));
  const total=state.cart.reduce((s,x)=>s+Number(x.price)*x.qty,0);
  return `<div class="pos"><div><h1>Nueva comanda</h1><div class="seg">${['mesa','llevar','domicilio'].map(x=>`<button data-type="${x}" class="${state.type===x?'on':''}">${x}</button>`).join('')}</div>
- ${state.type==='mesa'?`<select id="tableSelect"><option value="">Seleccionar mesa</option>${state.tables.map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select>`:''}
+ ${state.type==='mesa'?`<select id="tableSelect"><option value="">Seleccionar mesa</option>${state.tables.filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select>`:''}
  <div class="search"><span>⌕</span><input id="searchProduct" placeholder="Buscar producto" value="${esc(state.q)}"></div>
  <div class="chips"><button data-cat="Todos" class="${state.cat==='Todos'?'active':''}">Todos</button>${state.cats.map(c=>`<button data-cat="${esc(c.name)}" class="${state.cat===c.name?'active':''}">${esc(c.name)}</button>`).join('')}</div>
  <div class="grid">${filtered.map(p=>`<button ${p.sold_out?'disabled':''} class="product" data-product="${p.id}"><b>${esc(p.name)}</b><small>${p.sold_out?'AGOTADO':esc(state.cats.find(c=>c.id===p.category_id)?.name||'')}</small><strong>${money(p.price)}</strong></button>`).join('')}</div></div>
  <aside class="cart"><h2>Comanda</h2>${!state.cart.length?'<p class="muted">Selecciona productos para comenzar.</p>':''}${state.cart.map(x=>`<div class="cartrow"><div><b>${esc(x.name)}</b><small>${money(x.price)} c/u</small></div><div class="qty"><button data-minus="${x.id}">−</button><b>${x.qty}</b><button data-plus="${x.id}">+</button><button data-remove="${x.id}">×</button></div></div>`).join('')}<div class="total"><span>Total</span><b>${money(total)}</b></div><button class="primary wide" id="saveOrder">Enviar comanda</button></aside></div>`;
 }
 function mesas(){
- return `<h1>Mesas</h1><div class="tables">${state.tables.map(t=>{const o=state.orders.find(o=>o.table_id===t.id&&!['pagado','cancelado','entregado'].includes(o.status));return `<div class="tablecard ${o?'busy':'free'}"><span>▦</span><b>${esc(t.name)}</b><span>${o?money(o.total):'Disponible'}</span>${o?`<small>#${o.folio} · ${esc(o.status)}</small>`:''}</div>`}).join('')}</div>`;
+ const active=state.tables.filter(t=>t.active!==false), occupied=new Set(state.orders.filter(o=>!['pagado','cancelado'].includes(o.status)&&o.table_id).map(o=>o.table_id));
+ return `<div class="pagehead responsivehead"><div><span class="eyebrow">SALÓN</span><h1>Mesas</h1><p class="muted">Administra las mesas conforme crezca el negocio.</p></div><button class="primary" id="newTable">＋ Nueva mesa</button></div><div class="metricstrip"><div><span>Activas</span><b>${active.length}</b></div><div><span>Ocupadas</span><b>${active.filter(t=>occupied.has(t.id)).length}</b></div><div><span>Disponibles</span><b>${active.filter(t=>!occupied.has(t.id)).length}</b></div><div><span>Capacidad</span><b>${active.reduce((a,t)=>a+Number(t.seats||0),0)}</b></div></div><div class="tablecards">${state.tables.map(t=>{const occ=occupied.has(t.id);return `<article class="tablecard ${t.active===false?'disabled':''}"><div class="tablevisual"><span>▦</span><i class="${occ?'busy':'free'}"></i></div><div class="tablemeta"><div><h3>${esc(t.name)}</h3><small>${t.seats||4} lugares</small></div><em class="${occ?'busy':'free'}">${occ?'Ocupada':'Disponible'}</em></div><div class="tableactions"><button data-edittable="${t.id}" class="softbtn">Editar</button><button data-toggletable="${t.id}" class="softbtn">${t.active===false?'Activar':'Desactivar'}</button><button data-deletetable="${t.id}" class="dangerghost">Eliminar</button></div></article>`}).join('')}</div>`;
 }
+function openTableModal(id=null){const t=id?state.tables.find(x=>x.id===id):null;document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><form class="modal smallmodal" id="tableForm"><div class="modalhead"><div><small>SALÓN</small><h2>${t?'Editar mesa':'Nueva mesa'}</h2><p>Define nombre y capacidad.</p></div><button type="button" class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="tableformvisual">▦</div>${field('Nombre *','tableName',t?.name||`Mesa ${String(state.tables.length+1).padStart(2,'0')}`)}${field('Número de lugares *','tableSeats',t?.seats||4,'number')}<label class="toggleline"><input id="tableActive" type="checkbox" ${t?.active!==false?'checked':''}><span>Mesa activa para comandas</span></label></div><div class="modalfoot"><button type="button" id="cancelTable">Cancelar</button><button type="submit" class="primary">${t?'Guardar':'Crear mesa'}</button></div></form></div>`);$('#modalClose').onclick=$('#cancelTable').onclick=closeModal;$('#tableForm').onsubmit=e=>{e.preventDefault();saveTable(t?.id||null)}}
+async function saveTable(id){const name=$('#tableName').value.trim(),seats=Math.max(1,Number($('#tableSeats').value||1)),active=$('#tableActive').checked;if(!name)return toast('Escribe un nombre para la mesa');const r=id?await db.from('dining_tables').update({name,seats,active}).eq('id',id):await db.from('dining_tables').insert({name,seats,active});if(r.error)return toast(r.error.code==='23505'?'Ya existe una mesa con ese nombre':r.error.message);closeModal();toast(id?'Mesa actualizada':'Mesa creada');load()}
+async function toggleTable(id){const t=state.tables.find(x=>x.id===id);if(!t)return;const r=await db.from('dining_tables').update({active:t.active===false}).eq('id',id);if(r.error)return toast(r.error.message);load()}
+function confirmDeleteTable(id){const t=state.tables.find(x=>x.id===id);if(!t)return;if(state.orders.some(o=>o.table_id===id&&!['pagado','cancelado'].includes(o.status)))return toast('No puedes eliminar una mesa con una comanda activa');document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal confirmmodal"><div class="modalhead"><h2>Eliminar ${esc(t.name)}</h2><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><p>Dejará de aparecer para nuevas comandas. El historial no se pierde.</p></div><div class="modalfoot"><button id="cancelTableDelete">Cancelar</button><button class="danger" id="deleteTableNow">Eliminar</button></div></div></div>`);$('#modalClose').onclick=$('#cancelTableDelete').onclick=closeModal;$('#deleteTableNow').onclick=async()=>{const r=await db.from('dining_tables').delete().eq('id',id);if(r.error)return toast(r.error.message);closeModal();toast('Mesa eliminada');load()}}
 function products(){
  const active=state.products.filter(p=>p.active!==false).length,sold=state.products.filter(p=>p.sold_out).length;
  return `<div class="pagehead"><div><h1>Catálogo</h1><p class="muted">Administra productos, precios, categorías y disponibilidad.</p></div><button class="primary" id="newProduct">＋ Nuevo producto</button></div>
@@ -114,18 +160,28 @@ function fiado(){
 }
 function creditRows(items){
  if(!items.length)return `<div class="empty"><b>Sin ventas fiadas</b><span>Las ventas a crédito aparecerán aquí.</span></div>`;
- return `<div class="creditlist">${items.map(c=>{const pct=Math.max(0,Math.min(100,100-(Number(c.balance)/Math.max(Number(c.original_amount),1)*100)));return `<article class="credititem"><div class="creditmain"><div class="creditperson"><div class="clientavatar">${esc(c.customers?.name||'C').slice(0,1).toUpperCase()}</div><div><b>${esc(c.customers?.name||'Cliente')}</b><span>${esc(c.customers?.phone||'Sin teléfono')} · Pedido #${c.orders?.folio||'—'}</span></div></div><span class="badge ${c.status==='pagado'?'green':c.status==='parcial'?'':'red'}">${esc(c.status)}</span></div><div class="creditnumbers"><div><small>Importe</small><b>${money(c.original_amount)}</b></div><div><small>Saldo</small><strong>${money(c.balance)}</strong></div><div><small>Vencimiento</small><b>${c.due_date||'Sin fecha'}</b></div></div><div class="progress"><i style="width:${pct}%"></i></div><div class="creditfoot"><small>${Math.round(pct)}% liquidado · ${(c.credit_payments||[]).length} abono(s)</small>${Number(c.balance)>0?`<button class="primary" data-creditpay="${c.id}">Registrar abono</button>`:'<span class="paidmark">✓ Liquidado</span>'}</div></article>`}).join('')}</div>`;
+ return `<div class="creditlist">${items.map(c=>{const pct=Math.max(0,Math.min(100,100-(Number(c.balance)/Math.max(Number(c.original_amount),1)*100)));return `<article class="credititem"><div class="creditmain"><div class="creditperson"><div class="clientavatar">${esc(c.customers?.name||'C').slice(0,1).toUpperCase()}</div><div><b>${esc(c.customers?.name||'Cliente')}</b><span>${esc(c.customers?.phone||'Sin teléfono')} · Pedido #${c.orders?.folio||'—'}</span></div></div><span class="badge ${c.status==='pagado'?'green':c.status==='parcial'?'':'red'}">${esc(c.status)}</span></div><div class="creditnumbers"><div><small>Importe</small><b>${money(c.original_amount)}</b></div><div><small>Saldo</small><strong>${money(c.balance)}</strong></div><div><small>Vencimiento</small><b>${c.due_date||'Sin fecha'}</b></div></div><div class="progress"><i style="width:${pct}%"></i></div><div class="creditfoot"><small>${Math.round(pct)}% liquidado · ${(c.credit_payments||[]).length} abono(s)</small><div class="creditactions"><button data-editcredit="${c.id}">Editar</button>${Number(c.balance)>0?`<button class="primary" data-creditpay="${c.id}">Abonar</button>`:'<span class="paidmark">✓ Liquidado</span>'}<button class="dangerghost" data-deletecredit="${c.id}">Eliminar</button></div></div></article>`}).join('')}</div>`;
 }
 function filterCredits(){
  const q=($('#creditSearch')?.value||'').toLowerCase(),status=$('#creditStatus')?.value||'';
  const items=state.credits.filter(c=>(!status||c.status===status)&&(!q||(c.customers?.name||'').toLowerCase().includes(q)||String(c.orders?.folio||'').includes(q)));
  $('#creditContent').innerHTML=creditRows(items);bindCreditRows();
 }
-function bindCreditRows(){document.querySelectorAll('[data-creditpay]').forEach(b=>b.onclick=()=>openCreditPayment(b.dataset.creditpay))}
+function bindCreditRows(){document.querySelectorAll('[data-creditpay]').forEach(b=>b.onclick=()=>openCreditPayment(b.dataset.creditpay));document.querySelectorAll('[data-editcredit]').forEach(b=>b.onclick=()=>editCredit(b.dataset.editcredit));document.querySelectorAll('[data-deletecredit]').forEach(b=>b.onclick=()=>confirmDeleteCredit(b.dataset.deletecredit))}
 function openCreditPayment(id){
  const c=state.credits.find(x=>x.id===id);if(!c)return;
  document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal smallmodal"><div class="modalhead"><div><small>ABONO A FIADO</small><h2>${esc(c.customers?.name||'Cliente')}</h2></div><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><div class="creditreceipt"><div><small>Pedido</small><b>#${c.orders?.folio||'—'}</b></div><div><small>Deuda original</small><b>${money(c.original_amount)}</b></div><div><small>Saldo actual</small><strong>${money(c.balance)}</strong></div></div>${field('Monto a abonar *','creditAmount',c.balance,'number')}${field('Nota','creditNote','','text','Opcional')}<label>Método<select id="creditMethod"><option>efectivo</option><option>tarjeta</option><option>transferencia</option></select></label></div><div class="modalfoot"><button id="cancelCredit">Cancelar</button><button class="primary" id="saveCredit">Registrar abono</button></div></div></div>`);
  $('#modalClose').onclick=$('#cancelCredit').onclick=closeModal;$('#saveCredit').onclick=()=>saveCreditPayment(c);
+}
+function editCredit(id){
+ const c=state.credits.find(x=>x.id===id);if(!c)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><form class="modal smallmodal" id="editCreditForm"><div class="modalhead"><div><small>VENTA FIADA</small><h2>Editar datos</h2></div><button type="button" class="iconbtn" id="modalClose">×</button></div><div class="modalbody">${field('Cliente','creditClient',c.customers?.name||'')}${field('Teléfono','creditPhone',c.customers?.phone||'')}${field('Fecha compromiso','creditDue',c.due_date||'','date')}</div><div class="modalfoot"><button type="button" id="cancelCreditEdit">Cancelar</button><button class="primary" type="submit">Guardar</button></div></form></div>`);
+ $('#modalClose').onclick=$('#cancelCreditEdit').onclick=closeModal;$('#editCreditForm').onsubmit=async e=>{e.preventDefault();let r=await db.from('customers').update({name:$('#creditClient').value.trim(),phone:$('#creditPhone').value.trim()}).eq('id',c.customer_id);if(r.error)return toast(r.error.message);r=await db.from('credit_accounts').update({due_date:$('#creditDue').value||null,updated_at:new Date().toISOString()}).eq('id',c.id);if(r.error)return toast(r.error.message);closeModal();toast('Fiado actualizado');load()};
+}
+function confirmDeleteCredit(id){
+ const c=state.credits.find(x=>x.id===id);if(!c)return;
+ document.body.insertAdjacentHTML('beforeend',`<div class="modalback"><div class="modal confirmmodal"><div class="modalhead"><h2>Eliminar registro fiado</h2><button class="iconbtn" id="modalClose">×</button></div><div class="modalbody"><p>Se eliminarán los abonos y el registro de fiado. El pedido permanecerá y volverá a estado de pago pendiente.</p></div><div class="modalfoot"><button id="cancelCreditDelete">Cancelar</button><button class="danger" id="deleteCreditNow">Eliminar</button></div></div></div>`);
+ $('#modalClose').onclick=$('#cancelCreditDelete').onclick=closeModal;$('#deleteCreditNow').onclick=async()=>{let r=await db.from('credit_payments').delete().eq('credit_account_id',c.id);if(r.error)return toast(r.error.message);r=await db.from('credit_accounts').delete().eq('id',c.id);if(r.error)return toast(r.error.message);await db.from('orders').update({payment_status:'pendiente',credit_due_date:null}).eq('id',c.order_id);closeModal();toast('Fiado eliminado');load()}
 }
 async function saveCreditPayment(c){
  const amount=Number($('#creditAmount').value);if(!amount||amount<=0||amount>Number(c.balance))return toast('Ingresa un monto válido');
@@ -150,6 +206,12 @@ function render(){
 }
 function bind(){
  document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{state.page=b.dataset.nav;render()});
+ const savedCollapsed=localStorage.getItem('losamigos-sidebar')==='1';if(savedCollapsed)document.querySelector('.app')?.classList.add('sidebar-mini');
+ if($('#collapseSide'))$('#collapseSide').onclick=()=>{document.querySelector('.app').classList.toggle('sidebar-mini');localStorage.setItem('losamigos-sidebar',document.querySelector('.app').classList.contains('sidebar-mini')?'1':'0')};
+ if($('#mobileMenu'))$('#mobileMenu').onclick=()=>document.querySelector('.app').classList.add('sidebar-open');
+ if($('#sideoverlay'))$('#sideoverlay').onclick=()=>document.querySelector('.app').classList.remove('sidebar-open');
+ document.querySelectorAll('[data-editorder]').forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editorder));
+ document.querySelectorAll('[data-deleteorder]').forEach(b=>b.onclick=()=>confirmDeleteOrder(b.dataset.deleteorder));
  document.querySelectorAll('[data-type]').forEach(b=>b.onclick=()=>{state.type=b.dataset.type;render()});
  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{state.cat=b.dataset.cat;render()});
  const ts=$('#tableSelect'); if(ts)ts.onchange=e=>state.table=e.target.value;
@@ -162,7 +224,7 @@ function bind(){
  document.querySelectorAll('[data-status]').forEach(s=>s.onchange=()=>setStatus(s.dataset.status,s.value));
  document.querySelectorAll('[data-sold]').forEach(b=>b.onclick=()=>toggleSold(b.dataset.sold));
  if($('#saveOrder'))$('#saveOrder').onclick=openOrderModal;
- if($('#newProduct'))$('#newProduct').onclick=()=>openProductModal();
+ if($('#newTable'))$('#newTable').onclick=()=>openTableModal();document.querySelectorAll('[data-edittable]').forEach(b=>b.onclick=()=>openTableModal(b.dataset.edittable));document.querySelectorAll('[data-toggletable]').forEach(b=>b.onclick=()=>toggleTable(b.dataset.toggletable));document.querySelectorAll('[data-deletetable]').forEach(b=>b.onclick=()=>confirmDeleteTable(b.dataset.deletetable));if($('#newProduct'))$('#newProduct').onclick=()=>openProductModal();
  bindCatalogRows();
  if($('#catalogSearch'))$('#catalogSearch').oninput=filterCatalog;
  if($('#catalogCategory'))$('#catalogCategory').onchange=filterCatalog;
@@ -215,7 +277,7 @@ function openOrderModal(){
  bindOrderModal();
 }
 function serviceFields(){
- if(state.type==='mesa') return `<div class="fieldgrid"><label>Mesa *<select id="modalTable" required><option value="">Seleccionar mesa</option>${state.tables.map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label>${field('Cliente','customerName','','text','Opcional')}${field('Teléfono','customerPhone','','tel','Opcional')}</div>`;
+ if(state.type==='mesa') return `<div class="fieldgrid"><label>Mesa *<select id="modalTable" required><option value="">Seleccionar mesa</option>${state.tables.filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${state.table===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></label>${field('Cliente','customerName','','text','Opcional')}${field('Teléfono','customerPhone','','tel','Opcional')}</div>`;
  if(state.type==='domicilio') return `<div class="fieldgrid">${field('Cliente *','customerName','','text','Nombre completo')}${field('Teléfono *','customerPhone','','tel','999 000 0000')}${field('Dirección *','customerAddress','','text','Calle, número y colonia')}${field('Referencia','customerReference','','text','Color de casa, cruzamientos, etc.')}</div>`;
  return `<div class="fieldgrid">${field('Cliente','customerName','','text','Opcional')}${field('Teléfono','customerPhone','','tel','Opcional')}</div>`;
 }
